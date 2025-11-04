@@ -31,12 +31,11 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+/*------------------------Direcciones SPI--------------------------------------*/
 #define deviceAddress 0x55
 #define WriteSlaveAddress (deviceAddress <<1) | 0x00
 #define ReadSlaveAddress (deviceAddress <<1) | 0x01
-
-uint8_t buffUART [1];
-
+/*------------------------Variables de menu--------------------------------------*/
 uint8_t estadoMenu = 0;
 /* USER CODE END PD */
 
@@ -53,11 +52,13 @@ SPI_HandleTypeDef hspi1;
 UART_HandleTypeDef huart2;
 
 /* USER CODE BEGIN PV */
+/*------------------------Buffer de transmision/recepcion-------------------------*/
 uint8_t buffer;
+/*------------------------Buffer I2C---------------------------------------------*/
 uint8_t TX_Buffer[] = "S";
 uint8_t RX_Buffer[1];
-uint8_t cambioEstado = 0;
-uint8_t cmdSPI = 0;
+/*------------------------Variables SPI-----------------------------------------*/
+uint8_t spiUART[1];
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -75,6 +76,20 @@ static void MX_SPI1_Init(void);
 void transmit_uart (char*string){
 	uint8_t len = strlen(string);
 	HAL_UART_Transmit(&huart2, (uint8_t*) string,len,200);
+}
+/*----------------------Funciones de menu--------------------------------------*/
+void menu(){
+	transmit_uart("-------------------------------------------------\n Presione 1 para SPI (LED) o 2 para I2C (sensor).\n-------------------------------------------------\n");
+	char opcion = 0;
+	HAL_UART_Receive(&huart2, (uint8_t*)&opcion, 1, HAL_MAX_DELAY); //Espera a recibir una opcion seleccionada
+	if (opcion == '1') {
+		estadoMenu = 1;
+	} else if (opcion == '2') {
+		estadoMenu = 2;
+	} else {
+		transmit_uart("Opcion no valida.\r\n"); //Cualquier caracter no valido lo indica
+		estadoMenu = 0;
+	}
 }
 /* USER CODE END 0 */
 
@@ -119,39 +134,48 @@ int main(void)
   /* USER CODE BEGIN WHILE */
   while (1)
   {
-//	  if (cambioEstado == 1){
-//		  cambioEstado = 0;
-//		  if (cmdSPI == 1){
-//			  cmdSPI = 0;
-//		  }else{
-//			  cmdSPI = 1;
-//		  }
-//		  HAL_GPIO_WritePin(ESP32_CS_GPIO_Port, ESP32_CS_Pin, GPIO_PIN_RESET);
-//		  HAL_SPI_Transmit(&hspi1,&cmdSPI, 1, HAL_MAX_DELAY);
-//		  HAL_Delay(50);
-//		  HAL_UART_Transmit(&huart2, &cmdSPI,1, HAL_MAX_DELAY);
-//		  HAL_GPIO_WritePin(ESP32_CS_GPIO_Port, ESP32_CS_Pin, GPIO_PIN_SET);
-//	  }
-
-	  if (estadoMenu == 1){
-		  transmit_uart("Presione 1 para SPI o 2 para I2C.\n");
-		  if (buffUART[0] == '1'){
-			  transmit_uart("Se supone que SPI\n");
-		  }
-		  if (buffUART[0] == '2'){
-			  transmit_uart("Ha seleccionado I2C\n");
-			  TX_Buffer[0] = 'S';
-			  HAL_I2C_Master_Transmit(&hi2c1, (deviceAddress << 1) | 0x00, TX_Buffer, 1, HAL_MAX_DELAY);
-			  HAL_Delay(1000);
-			  TX_Buffer[0]= '0';
-			  HAL_I2C_Master_Transmit(&hi2c1, (deviceAddress << 1) | 0x00, TX_Buffer, 1, HAL_MAX_DELAY);
-			  HAL_Delay(1000);
-			  HAL_I2C_Master_Receive(&hi2c1, (deviceAddress << 1) | 0x01, (uint8_t*) RX_Buffer, 1, HAL_MAX_DELAY);
-			  HAL_UART_Transmit(&huart2, RX_Buffer, 1, 1000);
-			  HAL_Delay(1000);
-		  }
-		  estadoMenu = 0;
+switch(estadoMenu){
+	  case 0:
+		  menu();
+		  break;
+	case 1:
+		/*------------------------SPI--------------------------------------*/
+		transmit_uart("Ha seleccionado SPI\nSeleccione entre\n1. Led Azul 1s\n2. Led Rojo 1.5s\n3. Led Verde 0.5s\n");
+		HAL_UART_Receive(&huart2, spiUART, 1, HAL_MAX_DELAY); //Espera a recibir una seleccion del usuario
+	  HAL_GPIO_WritePin(ESP32_CS_GPIO_Port, ESP32_CS_Pin, GPIO_PIN_RESET); //Pin selector en bajo para declarar comunicacion
+	  HAL_SPI_Transmit(&hspi1,&spiUART, 1, HAL_MAX_DELAY);
+	  HAL_GPIO_WritePin(ESP32_CS_GPIO_Port, ESP32_CS_Pin, GPIO_PIN_SET);
+	  HAL_UART_Transmit(&huart2, &spiUART,1, HAL_MAX_DELAY); //Verificacion de envio por medio de uart
+	  transmit_uart("Informacion enviada, volviendo al menu\n");
+	  estadoMenu = 0; //Al finalizar, vuelve al menu
+		break;
+	case 2:
+		/*------------------------I2C--------------------------------------*/
+		transmit_uart("Ha seleccionado I2C\n");
+		/*------------------------Transmision I2C--------------------------------------*/
+	  TX_Buffer[0] = 'P';
+	  HAL_I2C_Master_Transmit(&hi2c1, WriteSlaveAddress, TX_Buffer, 1, HAL_MAX_DELAY);
+	  HAL_Delay(1000);
+	  TX_Buffer[0] = 'S';
+	  HAL_I2C_Master_Transmit(&hi2c1, WriteSlaveAddress, TX_Buffer, 1, HAL_MAX_DELAY);
+	  HAL_Delay(1000);
+	  TX_Buffer[0] = 'T';
+	  HAL_I2C_Master_Transmit(&hi2c1, WriteSlaveAddress, TX_Buffer, 1, HAL_MAX_DELAY);
+	  HAL_Delay(1000);
+	  /*------------------------Recepcion I2C--------------------------------------*/
+	  HAL_I2C_Master_Receive(&hi2c1, ReadSlaveAddress, (uint8_t*) RX_Buffer, 3, HAL_MAX_DELAY);
+	  transmit_uart("Dice el esp que el valor del sensor fue:");
+	  HAL_UART_Transmit(&huart2, RX_Buffer, 3, 1000);
+	  transmit_uart("\n");
+	  HAL_Delay(1000);
+	  transmit_uart("Volviendo al menu\n");
+	  estadoMenu = 0;//Al finalizar, vuelve al menu
+		break;
+	default:
+		estadoMenu = 0; //Cualquier otro caracter regresa al menu principal
+		break;
 	  }
+  }
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
@@ -365,17 +389,7 @@ static void MX_GPIO_Init(void)
 }
 
 /* USER CODE BEGIN 4 */
-void HAL_UART_RxCpltCallback (UART_HandleTypeDef *huart){
-	HAL_UART_Transmit(huart, buffUART, sizeof(buffUART), 1000);
-	estadoMenu = 1;
-	HAL_UART_Receive_IT(&huart2, buffUART, sizeof(buffUART));
-}
-void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin){
-	if (HAL_GPIO_ReadPin(B1_GPIO_Port, B1_Pin) == GPIO_PIN_RESET){
-		cambioEstado = 1;
-		HAL_GPIO_TogglePin(LD_GPIO_Port, LD_Pin);
-	}
-}
+
 /* USER CODE END 4 */
 
 /**
@@ -408,3 +422,4 @@ void assert_failed(uint8_t *file, uint32_t line)
   /* USER CODE END 6 */
 }
 #endif /* USE_FULL_ASSERT */
+
